@@ -1,0 +1,25 @@
+services:
+  spartan-stock-bot:
+    build: .
+    image: spartan-stock-bot:local
+    container_name: spartan-stock-bot
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    read_only: true
+    shm_size: "256mb"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
