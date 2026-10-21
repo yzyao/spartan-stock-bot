@@ -7,7 +7,7 @@ Spartan Host VPS 库存 Telegram 通知服务。Go + chromedp + 无头 Chromium 
 ## 功能
 
 - 默认监控 Seattle 的 CMIN2、Premium KVM、E5 KVM 三个分类，默认每次检查完成后等待 60 秒。
-- 一个常驻 Chromium 串行访问页面，运行 JavaScript、共享 Cookie；每页使用临时标签页并在结束后关闭，浏览器崩溃后自动重建。
+- 一个常驻 Chromium 串行访问页面，运行 JavaScript、在进程内共享 Cookie；默认每个进程使用独立临时 profile，每页使用临时标签页并在结束后关闭，浏览器崩溃后自动重建。
 - 初次发现有货发送新消息；同轮库存增减、价格等资料变化只编辑原消息；售罄编辑历史消息并关闭该轮；再次有货发送新消息。
 - 失败页面、缺失商品或未知库存保留旧值，绝不推断为零库存。
 - 启动前加载 JSON 状态，原子替换保存消息 ID；临时 Telegram 错误保留活动消息并重试。
@@ -80,7 +80,7 @@ TELEGRAM_CHANNEL_ID=填写频道的负数数字ID
 | `FETCH_MODE` | `browser`，默认直接启用无头 Chromium；可设为 `http` |
 | `BROWSER_TIMEOUT_SECONDS` | `45`，5–300 秒；启动及单页加载各自的超时，超时取消不会变成零库存 |
 | `BROWSER_EXECUTABLE` | 本地自动寻找 Chrome/Chromium；Docker 内为 `/usr/bin/chromium` |
-| `BROWSER_PROFILE_DIR` | `STATE_FILE` 同目录下的 `browser`；默认 `/data/browser`，用于 Chromium 会话数据与 Cookie |
+| `BROWSER_PROFILE_DIR` | 默认留空，为每个浏览器进程创建独立临时 profile；可显式设置 `/data/browser` 保存 Cookie，但必须自行管理单实例及旧锁 |
 | `BROWSER_PROXY_URL` | 可选 HTTP/HTTPS/SOCKS5 代理 URL，不支持 URL 中的用户名密码；浏览器不自动采用 `HTTP_PROXY`/`HTTPS_PROXY` |
 | `BROWSER_NO_SANDBOX` | 本地默认 `false`；Docker 镜像设置为 `true`，见下文容器隔离说明 |
 | `STATE_FILE` | `/data/state.json` |
@@ -110,7 +110,7 @@ docker compose up -d --build
 
 Docker 中为兼容容器内核/namespace 限制，镜像设置 `BROWSER_NO_SANDBOX=true`，关闭 Chromium 内部沙箱；仍使用非 root、移除全部 capabilities、`no-new-privileges` 和容器隔离。只访问配置的库存页面，不使用个人浏览器 profile。支持 Chromium 用户命名空间沙箱的部署可显式设 `BROWSER_NO_SANDBOX=false` 并验证启动。
 
-验证解析器前先停止正式服务，避免两个 Chromium 同时占用 profile。验证不需要 Telegram token，不读写 `state.json`、不发消息；浏览器 profile/Cookie 仍可能更新：
+验证解析器前先停止正式服务。验证不需要 Telegram token，不读写 `state.json`、不发消息；默认使用独立临时 profile。若显式设置了持久 `BROWSER_PROFILE_DIR`，必须确保没有其他 Chromium 正在使用它：
 
 ```bash
 docker compose stop
@@ -179,7 +179,7 @@ export STATE_FILE="$PWD/data/state.json"
 
 本地 Debian 可先 `sudo apt-get update && sudo apt-get install -y chromium`。Windows PowerShell 可逐项设置 `$env:TELEGRAM_BOT_TOKEN`、`$env:TELEGRAM_CHAT_ID`、`$env:TELEGRAM_ADMIN_IDS`、`$env:TELEGRAM_CHANNEL_ID` 和 `$env:STATE_FILE="$PWD/data/state.json"`，按需设置 `$env:BROWSER_EXECUTABLE` 为 Chrome 路径，随后 `go run ./cmd/spartan-stock-bot`。本地默认保留 Chromium 内部沙箱。
 
-纯站点验证不需要 Telegram 配置，先确保相同 profile 没被其他实例占用：
+纯站点验证不需要 Telegram 配置；指定持久 profile 时先确保它没被其他实例占用：
 
 ```bash
 go run ./cmd/spartan-stock-bot -verify
@@ -193,7 +193,7 @@ go run ./cmd/spartan-stock-bot -verify
 SPARTAN_BROWSER_TESTS=1 go test ./internal/spartan -run TestBrowserIntegration -v
 ```
 
-可设置 `BROWSER_EXECUTABLE` 指定程序路径。测试覆盖 JavaScript 渲染、标签页 Cookie 共享、挑战超时后继续使用原浏览器；Linux 额外检查 profile 在浏览器重启后保留 Cookie。受管 Windows 环境可能无法访问系统 DPAPI，跨重启 Cookie 测试在非 Linux 系统跳过。默认 `go test ./...` 不需要浏览器。
+可设置 `BROWSER_EXECUTABLE` 指定程序路径。测试覆盖 JavaScript 渲染、标签页 Cookie 共享、挑战超时后继续使用原浏览器，以及两个临时 profile 同时运行时的 Cookie 隔离。Linux 额外检查显式持久 profile 在浏览器重启后保留 Cookie。受管 Windows 环境可能无法访问系统 DPAPI，跨重启 Cookie 测试在非 Linux 系统跳过。默认 `go test ./...` 不需要浏览器。
 
 ## 管理命令
 
@@ -233,7 +233,9 @@ SPARTAN_BROWSER_TESTS=1 go test ./internal/spartan -run TestBrowserIntegration -
 
 商品优先用 `host:pid:ID` 或规范化的官方购买路径作为身份，忽略大小写，不依赖数组位置。解析独立于 HTTP/状态机，按 WHMCS `.product` 商品容器及其标题/数量/价格/订单链接查找；容器类名变化时可用订单链接祖先关系回退。只信任明确数字 `N Available`。名称、价格、周期、同站 HTTPS 订单 URL 缺失会跳过该商品并警告；未知商品不会被补零。
 
-浏览器先检查最终地址、文档状态码、Cloudflare 挑战标记、加载状态和 HTML 大小，再交给同一个 goquery 解析器。HTTP 错误、挑战超时、意外跨站跳转、浏览器进程退出均返回未知。`data/browser` 保存独立 Chromium profile；Cookie 可能过期或受出口 IP 限制，持久 profile 不代表可以永久通过挑战。不要提交或公开该目录。
+浏览器先检查最终地址、文档状态码、Cloudflare 挑战标记、加载状态和 HTML 大小，再交给同一个 goquery 解析器。HTTP 错误、挑战超时、意外跨站跳转、浏览器进程退出均返回未知。默认 profile 由 chromedp 在临时目录中创建并在正常退出后清理，Cookie 在同一进程的检查间共享，重启后重新建立会话；库存和 Telegram 消息 ID 仍完整保存于 `state.json`。这可避免 Docker 容器重建后复用带旧主机名的 Chromium `SingletonLock`。
+
+如确需跨重启保留浏览器 Cookie，可显式设置 `BROWSER_PROFILE_DIR=/data/browser`；同一目录只能由一个 Chromium 使用，所有旧容器停止后才可处理遗留锁。程序不会自动删除显式 profile 的锁，以免破坏仍在使用的资料。Cookie 可能过期或受出口 IP 限制，持久 profile 不代表可以永久通过挑战。不要提交或公开该目录。
 
 写入先序列化到同目录 `state.json.tmp`，文件权限 0600，`fsync`/关闭后重命名，Linux 上再同步目录。无文件正常初始化；损坏文件先保留为 `.corrupt-时间戳` 再恢复，当前有货可能重新通知。未知版本拒绝覆盖以保护升级数据。读写权限错误应修复权限，不会悄悄丢弃旧状态。
 
@@ -257,7 +259,7 @@ SPARTAN_BROWSER_TESTS=1 go test ./internal/spartan -run TestBrowserIntegration -
 | `409 Conflict` | 有其他实例在轮询，或 webhook 未删除；只保留一个实例并删除旧 webhook |
 | Spartan `403`、Cloudflare、HTML 变化 | 默认浏览器会执行页面 JavaScript 并等待；若仍超时，停止服务后在部署 VPS 执行 `-verify`。检查出口访问情况、等待或联系供应商确认允许访问；这些错误是未知库存 |
 | Chromium 启动失败 | 核对 `BROWSER_EXECUTABLE`、profile 写入权限、是否有其他实例占用；Docker 中检查是否覆盖了镜像的 `BROWSER_NO_SANDBOX` 设置 |
-| 浏览器 profile 锁定 | 只保留一个实例；先停服务再 `-verify`，不要在正在使用的 profile 上启动第二个 Chromium |
+| 浏览器 profile 锁定 | 新版本默认使用独立临时 profile；删除 `.env` 中显式的 `BROWSER_PROFILE_DIR` 可恢复默认。旧镜像可用 `-e BROWSER_PROFILE_DIR=/tmp/spartan-verify` 临时验证，不删除旧 profile。不要直接解锁仍被其他容器使用的目录 |
 | 内存不足/浏览器退出 | 增加可用内存，检查 `docker stats`；下一次抓取会重建浏览器。不要删除 `state.json` |
 | `/status` 一直显示旧库存 | 看每个商品的最后检查时间；HTTP/浏览器/解析失败时保留旧值是保护机制，查看 `inventory_fetch_or_parser_error` / `parser_warning` / `product_unknown` |
 | `permission denied` | `sudo chown -R 65532:65532 data`；自定义 `STATE_FILE` 时同步调整挂载目录和权限 |
@@ -271,4 +273,4 @@ SPARTAN_BROWSER_TESTS=1 go test ./internal/spartan -run TestBrowserIntegration -
 
 精简 HTML 夹具是重建结构，不是原始页面快照，见 `testdata/README.md`。必须在部署出口跑 `-verify` 验证可达性与当前 DOM，必要时按真实 HTML 调整选择器。403、挑战超时和页面失败绝不会触发售罄。
 
-本地离线测试覆盖生命周期、通知失败、售罄重试后再补货、JSON 重启、磁盘失败、损坏恢复、页面失败、管理员鉴权、长消息分割、时区和推广链接。新增浏览器复用、串行访问、进程断连恢复、启动/单页取消、挑战/状态码/重定向校验及子进程环境隔离测试。真实 Chrome 的本机集成测试已通过 JavaScript 渲染、Cookie 跨标签页共享和挑战超时后的浏览器复用；受管 Windows 环境使用 `BROWSER_NO_SANDBOX=true` 才能启动，Linux 专用跨重启 Cookie 测试在此跳过。构建采用 Go 1.27.3。Docker Engine 在开发环境未安装，镜像构建和 Linux Chromium profile 持久化仍需在 Debian/Docker 环境验证。未使用真实 Telegram 凭据，也未发送任何测试通知。
+本地离线测试覆盖生命周期、通知失败、售罄重试后再补货、JSON 重启、磁盘失败、损坏恢复、页面失败、管理员鉴权、长消息分割、时区和推广链接。新增浏览器复用、串行访问、进程断连恢复、启动/单页取消、挑战/状态码/重定向校验及子进程环境隔离测试。真实 Chrome 的本机集成测试已通过 JavaScript 渲染、Cookie 跨标签页共享、挑战超时后的浏览器复用，以及两个默认临时 profile 并存时的进程/Cookie 隔离；受管 Windows 环境使用 `BROWSER_NO_SANDBOX=true` 才能启动，Linux 专用跨重启 Cookie 测试在此跳过。构建采用 Go 1.27.3。Docker Engine 在开发环境未安装，镜像构建和 Linux 显式持久 profile 的持久化仍需在 Debian/Docker 环境验证。未使用真实 Telegram 凭据，也未发送任何测试通知。

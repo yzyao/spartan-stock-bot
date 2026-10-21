@@ -1,7 +1,6 @@
 package config
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +23,7 @@ func TestConfigDefaultsAndChannelAdmins(t *testing.T) {
 	if c.Interval != time.Minute || c.HTTPTimeout != 15*time.Second || c.StateFile != "/data/state.json" || c.Location.String() != "Asia/Shanghai" || len(c.URLs) != 3 || c.NotificationChatID != 42 || !c.AdminIDs[42] || c.AffiliateID != "1194" {
 		t.Fatalf("defaults %+v", c)
 	}
-	if c.FetchMode != "browser" || c.BrowserTimeout != 45*time.Second || c.BrowserNoSandbox {
+	if c.FetchMode != "browser" || c.BrowserTimeout != 45*time.Second || c.BrowserNoSandbox || c.BrowserProfileDir != "" {
 		t.Fatalf("browser defaults: %+v", c)
 	}
 	t.Setenv("TELEGRAM_CHANNEL_ID", "-10012345")
@@ -67,8 +66,13 @@ func TestBrowserConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.FetchMode != "http" || c.BrowserProfileDir != filepath.Join("local", "browser") || c.BrowserTimeout != time.Minute || !c.BrowserNoSandbox {
+	if c.FetchMode != "http" || c.BrowserProfileDir != "" || c.BrowserTimeout != time.Minute || !c.BrowserNoSandbox {
 		t.Fatalf("browser configuration %+v", c)
+	}
+	t.Setenv("BROWSER_PROFILE_DIR", "custom-profile")
+	c, err = Load(true)
+	if err != nil || c.BrowserProfileDir != "custom-profile" {
+		t.Fatalf("explicit profile configuration: %+v %v", c, err)
 	}
 	for _, tc := range []struct{ key, value string }{{"FETCH_MODE", "automatic"}, {"BROWSER_TIMEOUT_SECONDS", "0"}, {"BROWSER_NO_SANDBOX", "maybe"}, {"BROWSER_PROXY_URL", "http://secret:pass@example.com"}, {"BROWSER_PROXY_URL", "http://example.com/path"}, {"BROWSER_PROXY_URL", "ftp://example.com"}} {
 		t.Run(tc.key+tc.value, func(t *testing.T) {

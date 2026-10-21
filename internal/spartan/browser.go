@@ -86,7 +86,11 @@ func (b *Browser) Fetch(ctx context.Context, source string) ([]byte, error) {
 			}
 			return nil, err
 		}
-		b.log.Info("browser_started", "headless", true, "profile_dir", b.opts.ProfileDir)
+		mode := "temporary"
+		if b.opts.ProfileDir != "" {
+			mode = "persistent"
+		}
+		b.log.Info("browser_started", "headless", true, "profile_mode", mode, "profile_dir", b.opts.ProfileDir)
 	}
 	pageCtx, cancel := context.WithTimeout(ctx, b.opts.Timeout)
 	defer cancel()

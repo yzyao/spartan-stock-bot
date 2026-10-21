@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -80,7 +79,7 @@ func Load(requireTelegram bool) (Config, error) {
 		return c, fmt.Errorf("FETCH_MODE must be browser or http")
 	}
 	c.BrowserExecutable = strings.TrimSpace(os.Getenv("BROWSER_EXECUTABLE"))
-	c.BrowserProfileDir = env("BROWSER_PROFILE_DIR", filepath.Join(filepath.Dir(c.StateFile), "browser"))
+	c.BrowserProfileDir = strings.TrimSpace(os.Getenv("BROWSER_PROFILE_DIR"))
 	c.BrowserProxyURL = strings.TrimSpace(os.Getenv("BROWSER_PROXY_URL"))
 	if c.BrowserProxyURL != "" {
 		u, e := url.Parse(c.BrowserProxyURL)

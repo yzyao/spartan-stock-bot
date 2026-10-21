@@ -19,11 +19,16 @@ type chromiumSession struct {
 }
 
 func newChromiumSession(parent context.Context, opts BrowserOptions) (browserSession, error) {
-	if err := os.MkdirAll(opts.ProfileDir, 0700); err != nil {
-		return nil, fmt.Errorf("create browser profile: %w", err)
-	}
 	flags := append([]chromedp.ExecAllocatorOption(nil), chromedp.DefaultExecAllocatorOptions[:]...)
-	flags = append(flags, chromedp.UserDataDir(opts.ProfileDir), chromedp.Flag("disable-dev-shm-usage", false), chromedp.Flag("disable-gpu", true), chromedp.Flag("lang", "en-US"), chromedp.NoInheritEnv, chromedp.Env(browserEnvironment()...))
+	if opts.ProfileDir != "" {
+		if err := os.MkdirAll(opts.ProfileDir, 0700); err != nil {
+			return nil, fmt.Errorf("create browser profile: %w", err)
+		}
+		flags = append(flags, chromedp.UserDataDir(opts.ProfileDir))
+	}
+	// Without UserDataDir, chromedp allocates a unique temporary profile and
+	// removes it after the browser exits. Replacement processes do not reuse old singleton locks.
+	flags = append(flags, chromedp.Flag("disable-dev-shm-usage", false), chromedp.Flag("disable-gpu", true), chromedp.Flag("lang", "en-US"), chromedp.NoInheritEnv, chromedp.Env(browserEnvironment()...))
 	// Set this explicitly even when false: chromedp otherwise disables the sandbox automatically as root.
 	flags = append(flags, chromedp.Flag("no-sandbox", opts.NoSandbox))
 	if opts.Executable != "" {
@@ -43,6 +48,9 @@ func newChromiumSession(parent context.Context, opts BrowserOptions) (browserSes
 	if err != nil {
 		rootCancel()
 		allocCancel()
+		if opts.ProfileDir != "" && (strings.Contains(err.Error(), "SingletonLock") || strings.Contains(err.Error(), "profile appears to be in use")) {
+			return nil, fmt.Errorf("configured Chromium profile is locked; stop other instances or unset BROWSER_PROFILE_DIR to use an isolated temporary profile: %w", err)
+		}
 		return nil, fmt.Errorf("launch failed (check Chromium executable, sandbox and writable profile): %w", err)
 	}
 	return s, nil

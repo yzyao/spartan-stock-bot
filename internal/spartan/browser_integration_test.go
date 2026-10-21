@@ -93,3 +93,47 @@ func envOr(key, defaultValue string) string {
 	}
 	return defaultValue
 }
+
+func TestBrowserIntegrationTemporaryProfileIsolation(t *testing.T) {
+	if os.Getenv("SPARTAN_BROWSER_TESTS") != "1" {
+		t.Skip("set SPARTAN_BROWSER_TESTS=1 with Chrome/Chromium installed")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		if r.URL.Path == "/set" {
+			http.SetCookie(w, &http.Cookie{Name: "profile_session", Value: "isolated", Path: "/"})
+		}
+		cookie, err := r.Cookie("profile_session")
+		if err == nil && cookie.Value == "isolated" {
+			io.WriteString(w, "private session")
+		} else {
+			io.WriteString(w, "fresh session")
+		}
+	}))
+	defer server.Close()
+	noSandbox, err := strconv.ParseBool(envOr("BROWSER_NO_SANDBOX", "false"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := BrowserOptions{Executable: os.Getenv("BROWSER_EXECUTABLE"), Timeout: 15 * time.Second, NoSandbox: noSandbox}
+	first := NewBrowser(context.Background(), opts, browserLog())
+	defer first.Close()
+	if _, err := first.Fetch(context.Background(), server.URL+"/set"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := first.Fetch(context.Background(), server.URL+"/read")
+	if err != nil || !strings.Contains(string(data), "private session") {
+		t.Fatalf("temporary profile did not retain session cookies: %s %v", data, err)
+	}
+	// A second live process must start without sharing the first process's profile or cookies.
+	second := NewBrowser(context.Background(), opts, browserLog())
+	defer second.Close()
+	data, err = second.Fetch(context.Background(), server.URL+"/read")
+	if err != nil || !strings.Contains(string(data), "fresh session") {
+		t.Fatalf("temporary profiles were not isolated: %s %v", data, err)
+	}
+	data, err = first.Fetch(context.Background(), server.URL+"/read")
+	if err != nil || !strings.Contains(string(data), "private session") {
+		t.Fatalf("second browser damaged first session: %s %v", data, err)
+	}
+}
