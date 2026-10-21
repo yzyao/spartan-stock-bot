@@ -42,6 +42,15 @@ func run() error {
 	httpClient := spartan.HTTPClient(cfg.HTTPTimeout)
 	defer httpClient.CloseIdleConnections()
 	provider := &spartan.Client{HTTP: httpClient, URLs: cfg.URLs, Log: log}
+	if cfg.FetchMode == "tls" {
+		fetcher, err := spartan.NewTLSFetcher(spartan.TLSOptions{Profile: cfg.TLSClientProfile, ProxyURL: cfg.TLSProxyURL, Timeout: cfg.HTTPTimeout})
+		if err != nil {
+			return err
+		}
+		provider.Fetcher = fetcher
+		defer fetcher.Close()
+		log.Info("tls_client_initialized", "profile", cfg.TLSClientProfile, "http3", false, "proxy_enabled", cfg.TLSProxyURL != "")
+	}
 	if cfg.FetchMode == "browser" {
 		browser := spartan.NewBrowser(ctx, spartan.BrowserOptions{Executable: cfg.BrowserExecutable, ProfileDir: cfg.BrowserProfileDir, ProxyURL: cfg.BrowserProxyURL, Timeout: cfg.BrowserTimeout, NoSandbox: cfg.BrowserNoSandbox}, log)
 		provider.Fetcher = browser

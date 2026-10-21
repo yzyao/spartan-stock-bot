@@ -30,6 +30,8 @@ type Config struct {
 	URLs               []string
 	AffiliateID        string
 	FetchMode          string
+	TLSClientProfile   string
+	TLSProxyURL        string
 	BrowserExecutable  string
 	BrowserProfileDir  string
 	BrowserProxyURL    string
@@ -75,17 +77,22 @@ func Load(requireTelegram bool) (Config, error) {
 		return c, err
 	}
 	c.FetchMode = env("FETCH_MODE", "browser")
-	if c.FetchMode != "browser" && c.FetchMode != "http" {
-		return c, fmt.Errorf("FETCH_MODE must be browser or http")
+	if c.FetchMode != "browser" && c.FetchMode != "http" && c.FetchMode != "tls" {
+		return c, fmt.Errorf("FETCH_MODE must be browser, http or tls")
+	}
+	c.TLSClientProfile = env("TLS_CLIENT_PROFILE", "chrome_150")
+	if c.TLSClientProfile != "chrome_150" && c.TLSClientProfile != "firefox_148" {
+		return c, fmt.Errorf("TLS_CLIENT_PROFILE must be chrome_150 or firefox_148")
+	}
+	c.TLSProxyURL = strings.TrimSpace(os.Getenv("TLS_PROXY_URL"))
+	if err = validateProxy("TLS_PROXY_URL", c.TLSProxyURL); err != nil {
+		return c, err
 	}
 	c.BrowserExecutable = strings.TrimSpace(os.Getenv("BROWSER_EXECUTABLE"))
 	c.BrowserProfileDir = strings.TrimSpace(os.Getenv("BROWSER_PROFILE_DIR"))
 	c.BrowserProxyURL = strings.TrimSpace(os.Getenv("BROWSER_PROXY_URL"))
-	if c.BrowserProxyURL != "" {
-		u, e := url.Parse(c.BrowserProxyURL)
-		if e != nil || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-			return c, fmt.Errorf("BROWSER_PROXY_URL must be an HTTP/HTTPS/SOCKS5 proxy URL without credentials, query or path")
-		}
+	if err = validateProxy("BROWSER_PROXY_URL", c.BrowserProxyURL); err != nil {
+		return c, err
 	}
 	if c.BrowserTimeout, err = seconds("BROWSER_TIMEOUT_SECONDS", 45, 5, 300); err != nil {
 		return c, err
@@ -117,6 +124,17 @@ func Load(requireTelegram bool) (Config, error) {
 		seen[c.URLs[i]] = true
 	}
 	return c, nil
+}
+
+func validateProxy(key, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return fmt.Errorf("%s must be an HTTP/HTTPS/SOCKS5 proxy URL without credentials, query or path", key)
+	}
+	return nil
 }
 
 func env(key, def string) string {

@@ -1,6 +1,6 @@
 # SpartanStockBot
 
-Spartan Host VPS 库存 Telegram 通知服务。Go + chromedp + 无头 Chromium + goquery，无数据库或网页界面。默认启用无头浏览器，面向 Debian VPS，通过 Docker Compose 持续运行；可用 `FETCH_MODE=http` 切回普通 HTTP。
+Spartan Host VPS 库存 Telegram 通知服务。Go + chromedp + 无头 Chromium + goquery，无数据库或网页界面。默认启用无头浏览器，面向 Debian VPS，通过 Docker Compose 持续运行；支持 `FETCH_MODE=http` 普通 HTTP 和 `FETCH_MODE=tls` 浏览器 TLS/HTTP2 指纹模式。
 
 推荐采用 **公开频道接收通知 + 管理员私聊 bot**：订阅者无需逐个启动机器人，管理员仍独立控制检查。购买按钮指向对应套餐的 Spartan 官方订单页面，自动追加 `aff=1194`，不显示长 URL、不使用第三方短链。推广 ID 可配置；是否计入佣金由 Spartan 的推广系统决定。频道广告和商业合作由 Telegram/频道管理，不由此程序自动开通。
 
@@ -8,6 +8,7 @@ Spartan Host VPS 库存 Telegram 通知服务。Go + chromedp + 无头 Chromium 
 
 - 默认监控 Seattle 的 CMIN2、Premium KVM、E5 KVM 三个分类，默认每次检查完成后等待 60 秒。
 - 一个常驻 Chromium 串行访问页面，运行 JavaScript、在进程内共享 Cookie；默认每个进程使用独立临时 profile，每页使用临时标签页并在结束后关闭，浏览器崩溃后自动重建。
+- TLS 模式使用固定版本的 Go tls-client，无需启动 Chromium；支持 Chrome 150 / Firefox 148 指纹、请求头顺序、内存 Cookie、HTTPS 证书校验和同站重定向。它不执行 JavaScript、不自动解决验证码，不保证 Cloudflare 放行。
 - 初次发现有货发送新消息；同轮库存增减、价格等资料变化只编辑原消息；售罄编辑历史消息并关闭该轮；再次有货发送新消息。
 - 失败页面、缺失商品或未知库存保留旧值，绝不推断为零库存。
 - 启动前加载 JSON 状态，原子替换保存消息 ID；临时 Telegram 错误保留活动消息并重试。
@@ -22,7 +23,7 @@ Spartan Host VPS 库存 Telegram 通知服务。Go + chromedp + 无头 Chromium 
 cmd/spartan-stock-bot/   入口、命令处理、优雅退出、只读验证模式
 internal/config/        环境配置与校验
 internal/model/         商品与持久状态
-internal/spartan/       Chromium/HTTP 抓取、浏览器生命周期与隔离的 HTML 解析器
+internal/spartan/       Chromium/HTTP/TLS 抓取、浏览器生命周期与隔离的 HTML 解析器
 internal/state/         JSON 读取、损坏备份、原子写入
 internal/monitor/       提供商接口、库存状态机与调度
 internal/telegram/      Telegram API、长轮询、鉴权与消息格式
@@ -76,8 +77,10 @@ TELEGRAM_CHANNEL_ID=填写频道的负数数字ID
 | `TELEGRAM_ADMIN_IDS` | 允许的用户 ID，逗号分隔；留空时使用 `TELEGRAM_CHAT_ID` 作为唯一管理员 |
 | `TELEGRAM_CHANNEL_ID` | 频道数字 ID，如 `-100...`；留空为个人通知模式 |
 | `CHECK_INTERVAL_SECONDS` | `60`，1–86400 秒；建议保持至少 60 秒，避免频繁请求 |
-| `HTTP_TIMEOUT_SECONDS` | `15`，3–300 秒；长轮询服务端等待比客户端超时短 |
-| `FETCH_MODE` | `browser`，默认直接启用无头 Chromium；可设为 `http` |
+| `HTTP_TIMEOUT_SECONDS` | `15`，3–300 秒；用于 HTTP/TLS 请求，TLS 模式包含重定向和响应体读取；长轮询服务端等待比客户端超时短 |
+| `FETCH_MODE` | `browser`，默认直接启用无头 Chromium；可设为 `http` 或 `tls`，不自动切换模式 |
+| `TLS_CLIENT_PROFILE` | `chrome_150`；可选 `firefox_148`，仅用于 TLS 模式，与 User-Agent 配套，不接受任意名称 |
+| `TLS_PROXY_URL` | 可选 HTTP/HTTPS/SOCKS5 代理，仅用于 TLS 模式；不支持 URL 用户名密码，不自动采用 `HTTP_PROXY`/`HTTPS_PROXY` |
 | `BROWSER_TIMEOUT_SECONDS` | `45`，5–300 秒；启动及单页加载各自的超时，超时取消不会变成零库存 |
 | `BROWSER_EXECUTABLE` | 本地自动寻找 Chrome/Chromium；Docker 内为 `/usr/bin/chromium` |
 | `BROWSER_PROFILE_DIR` | 默认留空，为每个浏览器进程创建独立临时 profile；可显式设置 `/data/browser` 保存 Cookie，但必须自行管理单实例及旧锁 |
@@ -117,7 +120,7 @@ docker compose stop
 docker compose run --rm --no-deps spartan-stock-bot -verify
 ```
 
-在同一台 VPS 分别验证两个模式（命令只覆盖本次运行，不修改 `.env`）：
+在同一台 VPS 分别验证三种模式（命令只覆盖本次运行，不修改 `.env`）：
 
 ```bash
 docker compose build
@@ -126,6 +129,12 @@ docker compose stop
 # 普通 HTTP
 docker compose run --rm --no-deps -e FETCH_MODE=http spartan-stock-bot -verify
 
+# Go TLS/HTTP2 Chrome 指纹，不启动 Chromium
+docker compose run --rm --no-deps -e FETCH_MODE=tls -e TLS_CLIENT_PROFILE=chrome_150 spartan-stock-bot -verify
+
+# 可选：对照 Firefox 指纹
+docker compose run --rm --no-deps -e FETCH_MODE=tls -e TLS_CLIENT_PROFILE=firefox_148 spartan-stock-bot -verify
+
 # 无头 Chromium
 docker compose run --rm --no-deps -e FETCH_MODE=browser spartan-stock-bot -verify
 ```
@@ -133,6 +142,10 @@ docker compose run --rm --no-deps -e FETCH_MODE=browser spartan-stock-bot -verif
 每次命令后可用 `echo $?` 查看退出码。成功应为 `0`、`categories: 3`、非空 `products` 且无 `issues`；失败返回非零，并输出每个页面的问题。浏览器默认每页最多等待 45 秒，三页都遇到持续挑战时总耗时可能超过两分钟。验证完成后根据成功的模式修改 `.env` 中 `FETCH_MODE`，再运行 `docker compose up -d --build`。
 
 也可以在首次启动前先 `docker compose build`，再运行验证命令，最后 `docker compose up -d`。验证应输出 3 个成功分类、商品、数字库存、价格、月付周期和完整订单 URL，且退出码为 0。浏览器模式会等待普通 JavaScript/挑战页跳转直到超时，但无法保证 Cloudflare 放行，也不会点击或自动解决交互式验证码。
+
+TLS 模式基于 [tls-client v1.17.0](https://github.com/bogdanfinn/tls-client/tree/v1.17.0)，用浏览器 ClientHello、HTTP/2 设置及配套请求头减小客户端指纹差异，不需要额外容器。为了兼容 VPS/代理，当前固定使用 HTTP/2 或服务端协商的 HTTP/1.1，不启用 HTTP/3。Cookie 只在本进程内复用，退出即丢弃；Telegram API 继续使用标准 `net/http`。TLS 证书校验始终开启，不接受降级 HTTP 或跨站重定向。
+
+如果返回 `Cloudflare challenge` 或 `TLS HTTP 403`，仍表示验证未通过；TLS 指纹不等于执行 JavaScript 或完成人机验证。不要把它当作已经绕过 Cloudflare。确认 `-verify` 成功后，才在 `.env` 设置 `FETCH_MODE=tls` 和所用的 `TLS_CLIENT_PROFILE`，然后 `docker compose up -d --build`。默认 `FETCH_MODE=browser` 保持不变。
 
 查看日志、停止：
 
@@ -258,6 +271,7 @@ SPARTAN_BROWSER_TESTS=1 go test ./internal/spartan -run TestBrowserIntegration -
 | `401` / `403` Telegram 错误 | token 失效、bot 被屏蔽、频道 ID 或权限错误；修复后恢复检查 |
 | `409 Conflict` | 有其他实例在轮询，或 webhook 未删除；只保留一个实例并删除旧 webhook |
 | Spartan `403`、Cloudflare、HTML 变化 | 默认浏览器会执行页面 JavaScript 并等待；若仍超时，停止服务后在部署 VPS 执行 `-verify`。检查出口访问情况、等待或联系供应商确认允许访问；这些错误是未知库存 |
+| TLS 模式仍为 `403` / challenge | 指纹模式无法执行 JavaScript 挑战；可用另一种支持的指纹做一次对照。不要缩短轮询间隔或把失败当作零库存；需要人工验证、可用出口或供应商放行 |
 | Chromium 启动失败 | 核对 `BROWSER_EXECUTABLE`、profile 写入权限、是否有其他实例占用；Docker 中检查是否覆盖了镜像的 `BROWSER_NO_SANDBOX` 设置 |
 | 浏览器 profile 锁定 | 新版本默认使用独立临时 profile；删除 `.env` 中显式的 `BROWSER_PROFILE_DIR` 可恢复默认。旧镜像可用 `-e BROWSER_PROFILE_DIR=/tmp/spartan-verify` 临时验证，不删除旧 profile。不要直接解锁仍被其他容器使用的目录 |
 | 内存不足/浏览器退出 | 增加可用内存，检查 `docker stats`；下一次抓取会重建浏览器。不要删除 `state.json` |
@@ -274,3 +288,5 @@ SPARTAN_BROWSER_TESTS=1 go test ./internal/spartan -run TestBrowserIntegration -
 精简 HTML 夹具是重建结构，不是原始页面快照，见 `testdata/README.md`。必须在部署出口跑 `-verify` 验证可达性与当前 DOM，必要时按真实 HTML 调整选择器。403、挑战超时和页面失败绝不会触发售罄。
 
 本地离线测试覆盖生命周期、通知失败、售罄重试后再补货、JSON 重启、磁盘失败、损坏恢复、页面失败、管理员鉴权、长消息分割、时区和推广链接。新增浏览器复用、串行访问、进程断连恢复、启动/单页取消、挑战/状态码/重定向校验及子进程环境隔离测试。真实 Chrome 的本机集成测试已通过 JavaScript 渲染、Cookie 跨标签页共享、挑战超时后的浏览器复用，以及两个默认临时 profile 并存时的进程/Cookie 隔离；受管 Windows 环境使用 `BROWSER_NO_SANDBOX=true` 才能启动，Linux 专用跨重启 Cookie 测试在此跳过。构建采用 Go 1.27.3。Docker Engine 在开发环境未安装，镜像构建和 Linux 显式持久 profile 的持久化仍需在 Debian/Docker 环境验证。未使用真实 Telegram 凭据，也未发送任何测试通知。
+
+TLS 模式离线 HTTPS 测试覆盖两种指纹的 HTTP/2 协商、Chrome ClientHello GREASE、配套请求头、gzip 解压、Cookie/相对重定向、证书校验、取消、响应体超时、403/500/挑战页/布局变化/空响应/过大响应，以及跨站、HTTP 降级、带凭据跳转和重定向循环；失败保留未知，真实零库存仍可解析。TLS 模式的三页真实访问尝试被本地网络权限在 TCP 建连阶段拒绝（`connectex: access permissions`），尚未验证能否通过 Spartan 的 CF；请在部署 VPS 上运行上述 `FETCH_MODE=tls ... -verify` 命令确认。网页读取工具能够读取公开页面，不等同于此 Go 客户端或 VPS 出口验证成功。
