@@ -1,0 +1,24 @@
+services:
+  solver:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
+    environment:
+      LOG_LEVEL: info
+      LOG_HTML: "false"
+      TZ: Asia/Shanghai
+    shm_size: "256mb"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    restart: "no"
+  probe:
+    image: spartan-cf-probe:local
+    build: .
+    init: true
+    environment:
+      FLARESOLVERR_URL: http://solver:8191/v1
+      PROBE_PROXY_URL: ${PROBE_PROXY_URL:-}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"

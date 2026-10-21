@@ -4,6 +4,8 @@ Spartan Host VPS 库存 Telegram 通知服务。Go + chromedp + 无头 Chromium 
 
 推荐采用 **公开频道接收通知 + 管理员私聊 bot**：订阅者无需逐个启动机器人，管理员仍独立控制检查。购买按钮指向对应套餐的 Spartan 官方订单页面，自动追加 `aff=1194`，不显示长 URL、不使用第三方短链。推广 ID 可配置；是否计入佣金由 Spartan 的推广系统决定。频道广告和商业合作由 Telegram/频道管理，不由此程序自动开通。
 
+若 HTTP、TLS 和浏览器均被 Cloudflare 拦截，可先运行 [两个 GitHub 抓取方案的独立对照实验](experiments/cloudflare/README.md)：`bash experiments/cloudflare/run.sh both`。实验不改生产抓取模式、不读写库存状态、不发送 Telegram，默认只请求一个分类；确认拿到真实商品 HTML 后再考虑接入。
+
 ## 功能
 
 - 默认监控 Seattle 的 CMIN2、Premium KVM、E5 KVM 三个分类，默认每次检查完成后等待 60 秒。

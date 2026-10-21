@@ -1,0 +1,8 @@
+{
+  "name": "spartan-cloudflare-experiment",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "test": "node --test probe.test.mjs" },
+  "dependencies": { "cheerio": "1.2.0", "impit": "0.14.1" }
+}

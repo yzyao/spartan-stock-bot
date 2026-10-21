@@ -4,6 +4,7 @@ data/*
 !data/.gitkeep
 .tools
 build
+experiments
 *.exe
 *.tmp
 *.corrupt-*

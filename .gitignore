@@ -16,6 +16,8 @@ go.work.sum
 coverage.out
 /build/
 /.tools/
+/experiments/cloudflare/node_modules/
+/experiments/cloudflare/results/
 .idea/
 .vscode/
 *.swp
